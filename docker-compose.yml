@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sf_master
+      POSTGRES_USER: sf_master
+      POSTGRES_PASSWORD: sf_master_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sf_master -d sf_master"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: dev
+      LOG_LEVEL: INFO
+      DEBUG: "true"
+      DATABASE_URL: postgresql+psycopg2://sf_master:sf_master_pass@postgres:5432/sf_master
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: salesforce-data
+      MINIO_SECURE: "false"
+      SF_LOGIN_URL: https://test.salesforce.com
+      SF_API_VERSION: "59.0"
+      SF_BULK_POLL_INTERVAL_SECONDS: "10"
+      SF_BULK_MAX_WAIT_MINUTES: "120"
+      HMAC_ENABLED: "true"
+      HMAC_SECRET_KEY_CORE: dev-coordinator-secret
+      HMAC_SECRET_KEY_ENGINEER: dev-engineer-secret
+      HMAC_SIGNATURE_MAX_AGE: "300"
+      DATA_ROOT_DIR: /app/data/scans
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - scandata:/app/data/scans
+
+volumes:
+  pgdata:
+  miniodata:
+  scandata:
