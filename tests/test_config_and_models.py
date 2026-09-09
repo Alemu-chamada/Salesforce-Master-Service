@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from src.app.core.config import get_settings
 from src.app.models import (
+    ACTIVE_STATUSES,
+    IN_PROGRESS_STATUSES,
+    TERMINAL_STATUSES,
+    AuditEventCategory,
     AuditLog,
+    AuditOutcome,
     Base,
     DLQStatus,
     FailedExternalCall,
     Job,
     JobStatus,
-    TERMINAL_STATUSES,
-    IN_PROGRESS_STATUSES,
-    ACTIVE_STATUSES,
     JobStatusTransition,
-    AuditEventCategory,
-    AuditOutcome,
 )
 
 

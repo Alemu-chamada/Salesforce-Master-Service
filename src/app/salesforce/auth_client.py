@@ -3,27 +3,24 @@ from __future__ import annotations
 import base64
 import datetime as _dt
 import json
-import os
 import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import httpx
 
 from src.app.core.logging_setup import get_logger
-from src.app.core.utils import safe_get, utcnow
+from src.app.core.utils import utcnow
+from src.app.resilience.retry import RETRYABLE_STATUS_CODES, retry_call
 from src.app.salesforce.exceptions import (
     SalesforceAPIError,
     SalesforceAuthenticationError,
     SalesforceForbiddenError,
     SalesforceInvalidCredentialsError,
     SalesforceInvalidRequestError,
-    SalesforceNotFoundError,
-    SalesforceServerError,
     SalesforceTimeoutError,
-    SalesforceUnauthorizedError,
     classify_http_error,
 )
 
@@ -68,7 +65,7 @@ def _scrub(value: Any) -> Any:
     if value is None:
         return None
     if isinstance(value, dict):
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         for k, v in value.items():
             if isinstance(k, str) and k.lower() in _SENSITIVE_KEYS:
                 out[k] = "***REDACTED***"
@@ -79,9 +76,10 @@ def _scrub(value: Any) -> Any:
         return [_scrub(x) for x in value]
     if isinstance(value, str):
         s = value
-        if len(s) > 20 and not re.search(r"\s", s):
-            if s.lower().startswith(("00d", "bearer ")) or len(s) > 60:
-                return _mask(s)
+        if len(s) > 20 and not re.search(r"\s", s) and (
+            s.lower().startswith(("00d", "bearer ")) or len(s) > 60
+        ):
+            return _mask(s)
         if any(
             marker in s.lower()
             for marker in ("access_token=", "access_token\"", "password", "client_secret", "grant_type")
@@ -89,7 +87,7 @@ def _scrub(value: Any) -> Any:
             try:
                 parsed = json.loads(s)
                 return json.dumps(_scrub(parsed))
-            except Exception:
+            except (TypeError, ValueError):
                 return _mask(s, keep_first=0)
         return s
     return value
@@ -101,15 +99,21 @@ def _mask(s: str, keep_first: int = 4, keep_last: int = 4) -> str:
     return f"{s[:keep_first]}...{s[-keep_last:]}"
 
 
-def _build_cache_key(credentials: Dict[str, Any], login_url: str) -> str:
+def _build_cache_key(credentials: dict[str, Any], login_url: str) -> str:
     username = credentials.get("jwt_subject") or credentials.get("username") or ""
     client_id = credentials.get("client_id") or ""
     grant_type = credentials.get("grant_type") or ""
     return f"{login_url}|{grant_type}|{client_id.lower()}|{username.lower()}"
 
+def _setting(settings: Any, name: str, default: Any = None) -> Any:
+    value = getattr(settings, name, default)
+    if value is default and hasattr(settings, "model_dump"):
+        value = settings.model_dump().get(name, default)
+    return default if value is None else value
+
 
 class _CacheEntry:
-    __slots__ = ("token", "instance_url", "expires_at", "granted_at")
+    __slots__ = ("expires_at", "granted_at", "instance_url", "token")
 
     def __init__(
         self,
@@ -137,7 +141,7 @@ class _CacheEntry:
         return (self.expires_at - now).total_seconds() > 0
 
 
-def _parse_jwt_private_key(value: Optional[str], path: Optional[str]) -> Optional[str]:
+def _parse_jwt_private_key(value: str | None, path: str | None) -> str | None:
     if value:
         v = value.strip()
         if v:
@@ -167,20 +171,20 @@ class SalesforceAuthClient:
       - Username-password (``grant_type=password``) fallback
     """
 
-    def __init__(self, settings: Any, *, httpx_client: Optional[httpx.AsyncClient] = None) -> None:
+    def __init__(self, settings: Any, *, httpx_client: httpx.AsyncClient | None = None) -> None:
         self.settings = settings
-        self._cache: Dict[str, _CacheEntry] = {}
+        self._cache: dict[str, _CacheEntry] = {}
         self._lock = threading.RLock()
         self._httpx_client = httpx_client
 
     # ------------------------------------------------------------------
     # Token endpoints
     # ------------------------------------------------------------------
-    async def get_access_token(self, credentials: Dict[str, Any]) -> Dict[str, Any]:
+    async def get_access_token(self, credentials: dict[str, Any]) -> dict[str, Any]:
         if not credentials:
             raise SalesforceInvalidCredentialsError("credentials payload is empty")
 
-        login_url = credentials.get("login_url") or safe_get(self.settings, "SF_LOGIN_URL") or "https://login.salesforce.com"
+        login_url = credentials.get("login_url") or _setting(self.settings, "SF_LOGIN_URL") or "https://login.salesforce.com"
         login_url = login_url.rstrip("/")
         cache_key = _build_cache_key(credentials, login_url)
 
@@ -202,7 +206,7 @@ class SalesforceAuthClient:
         jwt_key = _parse_jwt_private_key(
             credentials.get("jwt_private_key"),
             credentials.get("jwt_private_key_path")
-            or safe_get(self.settings, "SF_JWT_PRIVATE_KEY_PATH"),
+            or _setting(self.settings, "SF_JWT_PRIVATE_KEY_PATH"),
         )
         prefer_jwt = jwt_key is not None
 
@@ -214,7 +218,7 @@ class SalesforceAuthClient:
                 )
             grant_result = await self._grant_jwt_bearer(
                 login_url=login_url,
-                client_id=credentials.get("client_id") or safe_get(self.settings, "SF_CLIENT_ID"),
+                client_id=credentials.get("client_id") or _setting(self.settings, "SF_CLIENT_ID"),
                 jwt_subject=credentials.get("jwt_subject") or credentials.get("username"),
                 private_key=jwt_key,
             )
@@ -224,8 +228,8 @@ class SalesforceAuthClient:
                 username=credentials.get("username"),
                 password=credentials.get("password"),
                 security_token=credentials.get("security_token"),
-                client_id=credentials.get("client_id") or safe_get(self.settings, "SF_CLIENT_ID"),
-                client_secret=credentials.get("client_secret") or safe_get(self.settings, "SF_CLIENT_SECRET"),
+                client_id=credentials.get("client_id") or _setting(self.settings, "SF_CLIENT_ID"),
+                client_secret=credentials.get("client_secret") or _setting(self.settings, "SF_CLIENT_SECRET"),
             )
         else:
             raise SalesforceInvalidRequestError(f"Unsupported grant_type: {grant_type}")
@@ -253,7 +257,7 @@ class SalesforceAuthClient:
     # ------------------------------------------------------------------
     # Credentials validation
     # ------------------------------------------------------------------
-    async def validate_credentials(self, credentials: Dict[str, Any]) -> Dict[str, Any]:
+    async def validate_credentials(self, credentials: dict[str, Any]) -> dict[str, Any]:
         auth = await self.get_access_token(credentials)
         identity = await self._fetch_identity(
             instance_url=auth["instance_url"],
@@ -273,12 +277,12 @@ class SalesforceAuthClient:
         self,
         *,
         login_url: str,
-        username: Optional[str],
-        password: Optional[str],
-        security_token: Optional[str],
-        client_id: Optional[str],
-        client_secret: Optional[str],
-    ) -> Dict[str, Any]:
+        username: str | None,
+        password: str | None,
+        security_token: str | None,
+        client_id: str | None,
+        client_secret: str | None,
+    ) -> dict[str, Any]:
         if not username or not password:
             raise SalesforceInvalidCredentialsError("username and password are required for password grant")
         if not client_id:
@@ -299,10 +303,10 @@ class SalesforceAuthClient:
         self,
         *,
         login_url: str,
-        client_id: Optional[str],
-        jwt_subject: Optional[str],
+        client_id: str | None,
+        jwt_subject: str | None,
         private_key: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not client_id:
             raise SalesforceInvalidCredentialsError(
                 "client_id is required for JWT Bearer grant (configure SF_CLIENT_ID or pass in credentials)"
@@ -324,7 +328,7 @@ class SalesforceAuthClient:
         """
         try:
             from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import padding
+            from cryptography.hazmat.primitives.asymmetric import padding, rsa
         except ImportError as exc:  # pragma: no cover - env check
             raise SalesforceInvalidRequestError(
                 "JWT Bearer grant requires the 'cryptography' package installed"
@@ -332,6 +336,8 @@ class SalesforceAuthClient:
 
         try:
             key = serialization.load_pem_private_key(private_key.encode("utf-8"), password=None)
+            if not isinstance(key, rsa.RSAPrivateKey):
+                raise TypeError("JWT private key must be an RSA key")
         except Exception as exc:
             raise SalesforceInvalidCredentialsError(f"Invalid JWT private key PEM: {exc.__class__.__name__}") from exc
 
@@ -364,7 +370,7 @@ class SalesforceAuthClient:
     # ------------------------------------------------------------------
     # Token HTTP + identity HTTP
     # ------------------------------------------------------------------
-    async def _do_token_grant(self, login_url: str, data: Dict[str, Any], identity_label: str) -> Dict[str, Any]:
+    async def _do_token_grant(self, login_url: str, data: dict[str, Any], identity_label: str) -> dict[str, Any]:
         client = self._acquire_client()
         url = f"{login_url}/services/oauth2/token"
         scrubbed_data = _scrub(data)
@@ -377,11 +383,21 @@ class SalesforceAuthClient:
         )
         start = time.perf_counter()
         try:
-            response = await client.post(
-                url,
-                data=data,
-                timeout=httpx.Timeout(safe_get(self.settings, "SF_TIMEOUT_SECONDS", 60), connect=10.0),
-            )
+            async def _post_token() -> httpx.Response:
+                response = await client.post(
+                    url,
+                    data=data,
+                    timeout=httpx.Timeout(_setting(self.settings, "SF_TIMEOUT_SECONDS", 60), connect=10.0),
+                )
+                if response.status_code in RETRYABLE_STATUS_CODES:
+                    try:
+                        response_payload = response.json()
+                    except ValueError:
+                        response_payload = {"raw": response.text[:200]}
+                    raise classify_http_error(response.status_code, response_payload, "Salesforce OAuth transient response")
+                return response
+
+            response = await retry_call(_post_token, op_label="salesforce.oauth.token")
         except httpx.TimeoutException as exc:
             raise SalesforceTimeoutError(
                 f"Salesforce token grant timed out for user={identity_label}: {exc.__class__.__name__}"
@@ -445,16 +461,26 @@ class SalesforceAuthClient:
             )
         raise classify_http_error(response.status_code, scrubbed_payload if isinstance(scrubbed_payload, dict) else {"raw": scrubbed_payload}, message)
 
-    async def _fetch_identity(self, *, instance_url: str, access_token: str) -> Dict[str, Any]:
+    async def _fetch_identity(self, *, instance_url: str, access_token: str) -> dict[str, Any]:
         client = self._acquire_client()
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
         url = f"{instance_url}/services/oauth2/userinfo"
         try:
-            response = await client.get(
-                url,
-                headers=headers,
-                timeout=httpx.Timeout(safe_get(self.settings, "SF_TIMEOUT_SECONDS", 60), connect=10.0),
-            )
+            async def _get_identity() -> httpx.Response:
+                response = await client.get(
+                    url,
+                    headers=headers,
+                    timeout=httpx.Timeout(_setting(self.settings, "SF_TIMEOUT_SECONDS", 60), connect=10.0),
+                )
+                if response.status_code in RETRYABLE_STATUS_CODES:
+                    try:
+                        response_payload = response.json()
+                    except ValueError:
+                        response_payload = {"raw": response.text[:200]}
+                    raise classify_http_error(response.status_code, response_payload, "Salesforce identity transient response")
+                return response
+
+            response = await retry_call(_get_identity, op_label="salesforce.oauth.identity")
         except httpx.TimeoutException as exc:
             raise SalesforceTimeoutError("Salesforce identity call timed out") from exc
         except httpx.ConnectError as exc:
@@ -499,15 +525,15 @@ class SalesforceAuthClient:
         with self._lock:
             self._cache.clear()
 
-    def invalidate_cache(self, credentials: Dict[str, Any], login_url: Optional[str] = None) -> None:
-        login_url = login_url or safe_get(self.settings, "SF_LOGIN_URL") or "https://login.salesforce.com"
+    def invalidate_cache(self, credentials: dict[str, Any], login_url: str | None = None) -> None:
+        login_url = login_url or _setting(self.settings, "SF_LOGIN_URL") or "https://login.salesforce.com"
         key = _build_cache_key(credentials, login_url.rstrip("/"))
         with self._lock:
             self._cache.pop(key, None)
 
-    def _compute_expires_at(self, granted_at: _dt.datetime, grant_result: Dict[str, Any]) -> _dt.datetime:
+    def _compute_expires_at(self, granted_at: _dt.datetime, grant_result: dict[str, Any]) -> _dt.datetime:
         issued_str = grant_result.get("issued_at")
-        ttl_seconds: Optional[int] = None
+        ttl_seconds: int | None = None
         if isinstance(issued_str, str) and issued_str.isdigit():
             issued_ms = int(issued_str)
             granted_epoch_ms = int(granted_at.timestamp() * 1000)

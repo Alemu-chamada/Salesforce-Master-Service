@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Dict, Optional
+from typing import Any
 
 from sqlalchemy import JSON, BigInteger, DateTime, Enum, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from src.app.core.utils import utcnow
 from src.app.db.base import Base
 from src.app.models.enums import DLQStatus
-from src.app.core.utils import utcnow
 
 
 class FailedExternalCall(Base):
@@ -19,14 +19,14 @@ class FailedExternalCall(Base):
     target_service: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     operation: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
 
-    organization_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
-    scan_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    organization_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    scan_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
-    payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    payload_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    payload_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[DLQStatus] = mapped_column(
         Enum(DLQStatus, name="dlq_status_enum"),
         default=DLQStatus.NEW,

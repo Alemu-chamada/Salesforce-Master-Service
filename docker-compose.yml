@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: sf_master
       POSTGRES_PASSWORD: sf_master_pass
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -46,7 +46,10 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: salesforce-data
       MINIO_SECURE: "false"
-      SF_LOGIN_URL: https://test.salesforce.com
+      SF_LOGIN_URL: ${SF_LOGIN_URL}
+      SF_CLIENT_ID: ${SF_CLIENT_ID}
+      SF_CLIENT_SECRET: ${SF_CLIENT_SECRET}
+      SF_JWT_PRIVATE_KEY_PATH: /app/salesforce.key
       SF_API_VERSION: "59.0"
       SF_BULK_POLL_INTERVAL_SECONDS: "10"
       SF_BULK_MAX_WAIT_MINUTES: "120"
@@ -64,6 +67,7 @@ services:
         condition: service_healthy
     volumes:
       - scandata:/app/data/scans
+      - ./salesforce.key:/app/salesforce.key:ro
 
 volumes:
   pgdata:

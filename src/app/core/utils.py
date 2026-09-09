@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import datetime as _dt
-import json
 import uuid
+from collections.abc import Iterable
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 
 def deep_serialize(obj: Any) -> Any:
@@ -30,8 +30,8 @@ def deep_serialize(obj: Any) -> Any:
 
 
 def calculate_duration(
-    start: Optional[_dt.datetime], end: Optional[_dt.datetime]
-) -> Optional[float]:
+    start: _dt.datetime | None, end: _dt.datetime | None
+) -> float | None:
     if start is None or end is None:
         return None
     if end < start:
@@ -39,7 +39,7 @@ def calculate_duration(
     return round((end - start).total_seconds(), 3)
 
 
-def build_pagination_info(page: int, page_size: int, total: int) -> Dict[str, Any]:
+def build_pagination_info(page: int, page_size: int, total: int) -> dict[str, Any]:
     total_pages = max(1, (total + page_size - 1) // page_size)
     return {
         "page": page,
@@ -52,13 +52,13 @@ def build_pagination_info(page: int, page_size: int, total: int) -> Dict[str, An
 
 
 def utcnow() -> _dt.datetime:
-    return _dt.datetime.now(tz=_dt.timezone.utc)
+    return _dt.datetime.now(tz=_dt.UTC)
 
 
-def chunks(iterable: Iterable[Any], size: int) -> Iterable[List[Any]]:
+def chunks(iterable: Iterable[Any], size: int) -> Iterable[list[Any]]:
     if size <= 0:
         raise ValueError("chunk size must be positive")
-    batch: List[Any] = []
+    batch: list[Any] = []
     for item in iterable:
         batch.append(item)
         if len(batch) >= size:
@@ -68,7 +68,7 @@ def chunks(iterable: Iterable[Any], size: int) -> Iterable[List[Any]]:
         yield batch
 
 
-def safe_get(record: Dict[str, Any], key: str, default: Any = None) -> Any:
+def safe_get(record: dict[str, Any], key: str, default: Any = None) -> Any:
     if not isinstance(record, dict):
         return default
     value = record.get(key, default)

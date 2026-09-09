@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from typing import AsyncIterator
+from typing import Any
 
 import httpx
 import pytest
@@ -17,7 +16,6 @@ from src.app.salesforce.exceptions import (
     SalesforceUnauthorizedError,
     classify_http_error,
 )
-
 
 BASE = "https://example.my.salesforce.com/services/data/v59.0"
 TOKEN = "00D!token"
@@ -41,7 +39,10 @@ class _Handler:
                 continue
             if needle not in url_path:
                 continue
+            import inspect
             result = responder(request)
+            if inspect.iscoroutine(result):
+                result = await result
             if isinstance(result, httpx.Response):
                 return result
             return result
@@ -112,7 +113,8 @@ async def test_create_query_job_happy_path():
 
     def _create(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        body = request.json()
+        import json as _json
+        body = _json.loads(request.content)
         assert body["operation"] == "query"
         assert body["object"] == "Account"
         assert "SELECT Id, Name" in body["query"]
@@ -162,7 +164,7 @@ async def test_get_job_status_happy_path():
 @pytest.mark.asyncio
 async def test_get_job_results_single_page_stream():
     client, h = _client()
-    csv_body = "Id,Name\n001A,Alpha\n001B,Beta\n".encode("utf-8")
+    csv_body = b"Id,Name\n001A,Alpha\n001B,Beta\n"
 
     async def _responder(request) -> httpx.Response:
         headers = {
@@ -184,8 +186,8 @@ async def test_get_job_results_single_page_stream():
 @pytest.mark.asyncio
 async def test_get_job_results_paginated_multiple_pages():
     client, h = _client()
-    page1 = "Id,Name\n001A,Alpha\n001B,Beta\n".encode()
-    page2 = "001C,Gamma\n001D,Delta\n".encode()
+    page1 = b"Id,Name\n001A,Alpha\n001B,Beta\n"
+    page2 = b"001C,Gamma\n001D,Delta\n"
 
     state = {"page": 1}
 
@@ -222,7 +224,8 @@ async def test_abort_and_close_job():
     last_state = {"state": None}
 
     def _patch(request):
-        body = request.json()
+        import json as _json
+        body = _json.loads(request.content)
         last_state["state"] = body["state"]
         return httpx.Response(
             200,
@@ -392,7 +395,7 @@ async def test_create_query_job_missing_id_is_server_error():
 
 @pytest.mark.asyncio
 async def test_close_with_unknown_state_raises():
-    client, h = _client()
+    _, _ = _client()
     from src.app.salesforce.batch_api_client import SalesforceBatchAPIClient as S
     c = S(TOKEN, "https://example.my.salesforce.com", "59.0")
     with pytest.raises(SalesforceInvalidRequestError):

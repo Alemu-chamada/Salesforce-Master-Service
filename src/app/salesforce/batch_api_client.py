@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import time
-from typing import Any, AsyncIterator, Dict, List, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 
 from src.app.core.logging_setup import get_logger
-from src.app.core.utils import safe_get
 from src.app.salesforce.auth_client import _mask, _scrub
 from src.app.salesforce.exceptions import (
     SalesforceAPIError,
@@ -22,7 +22,7 @@ log = get_logger(__name__)
 _VALID_OPERATIONS = {"query", "queryAll"}
 
 
-def _headers(access_token: str) -> Dict[str, str]:
+def _headers(access_token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/json",
@@ -56,7 +56,7 @@ class SalesforceBatchAPIClient:
         instance_url: str,
         api_version: str,
         *,
-        httpx_client: Optional[httpx.AsyncClient] = None,
+        httpx_client: httpx.AsyncClient | None = None,
         timeout_seconds: int = 60,
     ) -> None:
         if not access_token:
@@ -84,7 +84,7 @@ class SalesforceBatchAPIClient:
         operation: str = "query",
         column_delimiter: str = "COMMA",
         line_ending: str = "LF",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not object_name:
             raise SalesforceInvalidRequestError("object_name is required")
         if not soql or not isinstance(soql, str) or not soql.strip():
@@ -119,6 +119,11 @@ class SalesforceBatchAPIClient:
             headers_extra={"Content-Type": "application/json"},
         )
         payload = response.get("json")
+        if not isinstance(payload, dict):
+            raise SalesforceServerError(
+                "Salesforce Bulk API create_query_job returned invalid payload",
+                response_payload={"raw": str(payload)[:500]},
+            )
         job_id = payload.get("id") or payload.get("jobId")
         if not job_id:
             raise SalesforceServerError(
@@ -138,7 +143,7 @@ class SalesforceBatchAPIClient:
             "raw": payload,
         }
 
-    async def get_job_status(self, job_id: str) -> Dict[str, Any]:
+    async def get_job_status(self, job_id: str) -> dict[str, Any]:
         _validate_job_id(job_id)
         response = await self._request("GET", f"/jobs/query/{job_id}")
         payload = response.get("json")
@@ -172,8 +177,8 @@ class SalesforceBatchAPIClient:
     async def get_job_results(
         self,
         job_id: str,
-        locator: Optional[str] = None,
-        max_records: Optional[int] = None,
+        locator: str | None = None,
+        max_records: int | None = None,
     ) -> AsyncIterator[bytes]:
         """Yield the raw CSV result stream (optionally paged via ``locator``).
 
@@ -184,7 +189,7 @@ class SalesforceBatchAPIClient:
         for a higher level iterator with automatic locator paging.
         """
         _validate_job_id(job_id)
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if locator:
             params["locator"] = locator
         if max_records is not None and max_records > 0:
@@ -210,10 +215,10 @@ class SalesforceBatchAPIClient:
         }
 
     async def get_job_results_paginated(
-        self, job_id: str, max_records_per_page: Optional[int] = None
+        self, job_id: str, max_records_per_page: int | None = None
     ) -> AsyncIterator[bytes]:
         """Iterate all pages of a Bulk API 2.0 result via the Sforce-Locator header."""
-        locator: Optional[str] = None
+        locator: str | None = None
         while True:
             buffer = bytearray()
             async for chunk in self.get_job_results(job_id, locator=locator, max_records=max_records_per_page):
@@ -224,13 +229,13 @@ class SalesforceBatchAPIClient:
             if not locator or locator == "null":
                 return
 
-    async def abort_job(self, job_id: str) -> Dict[str, Any]:
+    async def abort_job(self, job_id: str) -> dict[str, Any]:
         return await self._patch_job_state(job_id, state="Aborted")
 
-    async def close_job(self, job_id: str) -> Dict[str, Any]:
+    async def close_job(self, job_id: str) -> dict[str, Any]:
         return await self._patch_job_state(job_id, state="Closed")
 
-    async def _patch_job_state(self, job_id: str, *, state: str) -> Dict[str, Any]:
+    async def _patch_job_state(self, job_id: str, *, state: str) -> dict[str, Any]:
         _validate_job_id(job_id)
         if state not in {"Aborted", "Closed"}:
             raise SalesforceInvalidRequestError(f"Invalid job state transition target: {state}")
@@ -241,7 +246,8 @@ class SalesforceBatchAPIClient:
             json=body,
             headers_extra={"Content-Type": "application/json; charset=UTF-8"},
         )
-        payload = response.get("json") if isinstance(response.get("json"), dict) else {"raw": str(response.get("json"))[:500]}
+        payload_value = response.get("json")
+        payload = payload_value if isinstance(payload_value, dict) else {"raw": str(payload_value)[:500]}
         return {
             "job_id": payload.get("id") or job_id,
             "state": payload.get("state", state),
@@ -268,9 +274,9 @@ class SalesforceBatchAPIClient:
         method: str,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        headers_extra: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        json: dict[str, Any] | None = None,
+        headers_extra: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         t0 = time.perf_counter()
         client = self._acquire_client()
         url = f"{self._base}{path}"
@@ -325,19 +331,19 @@ class SalesforceBatchAPIClient:
             detail = payload[0].get("message")
             if detail:
                 message += f" detail={str(detail)[:300]}"
-        raise classify_http_error(
-            resp.status_code,
-            scrubbed_payload if isinstance(scrubbed_payload, dict) else {"raw": scrubbed_payload},
-            message,
-        )
+        # Pass list payloads directly; only wrap truly unstructured non-dict/non-list values
+        if isinstance(scrubbed_payload, (dict, list)):
+            raise classify_http_error(resp.status_code, scrubbed_payload, message)
+        else:
+            raise classify_http_error(resp.status_code, {"raw": str(scrubbed_payload)[:500]}, message)
 
     async def _request_raw(
         self,
         method: str,
         path: str,
         *,
-        headers_extra: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        headers_extra: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         t0 = time.perf_counter()
         client = self._acquire_client()
         url = f"{self._base}{path}"
@@ -365,15 +371,15 @@ class SalesforceBatchAPIClient:
         if not (200 <= resp.status_code < 300):
             try:
                 payload = resp.json()
-            except Exception:
+            except ValueError:
                 try:
                     payload = {"raw": (await resp.aread()).decode("utf-8", errors="replace")[:500]}
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     payload = {"raw": "unreadable"}
             try:
                 await resp.aclose()
-            except Exception:
-                pass
+            except (OSError, RuntimeError):
+                log.debug("Salesforce Bulk API %s %s response close failed", method, self._safe_path(path))
             message = (
                 f"Salesforce Bulk API {method} {self._safe_path(path)} "
                 f"download failed status={resp.status_code}"
@@ -387,7 +393,7 @@ class SalesforceBatchAPIClient:
         try:
             num_records_header = resp.headers.get("Sforce-NumberOfRecords")
             number_of_records = int(num_records_header) if num_records_header and num_records_header.isdigit() else None
-        except Exception:
+        except (TypeError, ValueError):
             number_of_records = None
         log.info(
             "Salesforce Bulk API %s %s status=200 elapsed_ms=%s records=%s has_next_locator=%s",
@@ -405,8 +411,8 @@ class SalesforceBatchAPIClient:
             finally:
                 try:
                     await resp.aclose()
-                except Exception:
-                    pass
+                except (OSError, RuntimeError):
+                    log.debug("Salesforce Bulk API %s %s stream close failed", method, self._safe_path(path))
 
         return {
             "stream": _stream(),
@@ -423,7 +429,7 @@ class SalesforceBatchAPIClient:
         return path[:80] + "..." + path[-40:]
 
 
-def safe_int(value: Any) -> Optional[int]:
+def safe_int(value: Any) -> int | None:
     if value is None:
         return None
     if isinstance(value, int):
@@ -436,5 +442,5 @@ def safe_int(value: Any) -> Optional[int]:
             return int(stripped)
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None

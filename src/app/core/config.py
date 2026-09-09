@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,10 +21,9 @@ class AppSettings(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def _validate_production_guardrails(self) -> "AppSettings":
-        if self.APP_ENV.lower() in {"prod", "production", "stage", "staging"}:
-            if self.DEBUG:
-                raise ValueError("DEBUG must be False in staging/production environments")
+    def _validate_production_guardrails(self) -> AppSettings:
+        if self.APP_ENV.lower() in {"prod", "production", "stage", "staging"} and self.DEBUG:
+            raise ValueError("DEBUG must be False in staging/production environments")
         return self
 
 
@@ -42,11 +41,21 @@ class SalesforceSettings(BaseSettings):
     SF_LOGIN_URL: str = Field(default="https://test.salesforce.com")
     SF_CLIENT_ID: str = Field(default="REPLACE_ME_CONNECTED_APP_CONSUMER_KEY")
     SF_CLIENT_SECRET: str = Field(default="REPLACE_ME_CONNECTED_APP_CONSUMER_SECRET")
-    SF_JWT_PRIVATE_KEY_PATH: Optional[str] = Field(default=None)
+    SF_JWT_PRIVATE_KEY_PATH: str | None = Field(default=None)
     SF_API_VERSION: str = Field(default="59.0")
     SF_TIMEOUT_SECONDS: int = Field(default=60, ge=1)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> SalesforceSettings:
+        env = os.getenv("APP_ENV", "dev").lower()
+        if env in {"prod", "production", "stage", "staging"}:
+            if self.SF_CLIENT_ID.startswith("REPLACE_ME"):
+                raise ValueError("SF_CLIENT_ID must be set in staging/production")
+            if self.SF_CLIENT_SECRET.startswith("REPLACE_ME") and not self.SF_JWT_PRIVATE_KEY_PATH:
+                raise ValueError("SF_CLIENT_SECRET or SF_JWT_PRIVATE_KEY_PATH must be set in staging/production")
+        return self
 
 
 _DEFAULT_OBJECTS = [
@@ -100,6 +109,7 @@ _DEFAULT_DELAYS = [1, 2, 4]
 class ResilienceSettings(BaseSettings):
     EXTERNAL_CALL_MAX_RETRIES: int = Field(default=3, ge=0)
     EXTERNAL_CALL_RETRY_DELAYS: Any = Field(default_factory=lambda: list(_DEFAULT_DELAYS))
+    EXTERNAL_CALL_MAX_DELAY_SECONDS: float = Field(default=30.0, ge=0)
     EXTERNAL_CALL_JITTER: bool = Field(default=True)
     DLQ_PAYLOAD_MAX_BYTES: int = Field(default=65536, ge=1024)
 
@@ -124,7 +134,7 @@ class HMACSettings(BaseSettings):
     HMAC_SECRET_KEY_CORE: str = Field(default="REPLACE_ME_COORDINATOR_SHARED_SECRET")
     HMAC_SECRET_KEY_ENGINEER: str = Field(default="REPLACE_ME_ENGINEER_READONLY_SECRET")
     HMAC_SIGNATURE_MAX_AGE: int = Field(default=300, ge=30)
-    HMAC_CLIENT_CONFIG: Dict[str, Dict[str, Any]] = Field(
+    HMAC_CLIENT_CONFIG: dict[str, dict[str, Any]] = Field(
         default_factory=lambda: {
             "coordinator": {"role": "full"},
             "engineer": {"role": "read_only"},
@@ -141,7 +151,7 @@ class HMACSettings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def _validate_production_guardrails(self) -> "HMACSettings":
+    def _validate_production_guardrails(self) -> HMACSettings:
         env = os.getenv("APP_ENV", "dev").lower()
         if env in {"prod", "production", "stage", "staging"}:
             if not self.HMAC_ENABLED:

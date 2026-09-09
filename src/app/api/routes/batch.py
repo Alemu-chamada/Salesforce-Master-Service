@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any, Dict
-
 from fastapi import APIRouter, Depends
 
 from src.app.core.config import get_settings

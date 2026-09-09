@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any, Dict
+from typing import Any
 
 from pythonjsonlogger import jsonlogger
 
@@ -43,5 +43,5 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def log_context(**kwargs: Any) -> Dict[str, Any]:
+def log_context(**kwargs: Any) -> dict[str, Any]:
     return {k: v for k, v in kwargs.items() if v is not None}
