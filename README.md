@@ -231,6 +231,21 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
+For production schema management, install dependencies and run migrations:
+
+```bash
+alembic upgrade head
+```
+
+The application retains `create_all` for development/test startup compatibility;
+production deployments should run Alembic before starting the service.
+
+External Salesforce and MinIO calls use bounded retry policies configured by
+`EXTERNAL_CALL_MAX_RETRIES`, `EXTERNAL_CALL_RETRY_DELAYS`,
+`EXTERNAL_CALL_MAX_DELAY_SECONDS`, and `EXTERNAL_CALL_JITTER`. Exhausted
+retryable calls are persisted in `failed_external_calls` with sensitive payload
+fields scrubbed.
+
 The test suite currently covers:
 
 - Settings loading + Pydantic validators, including the job status enum and

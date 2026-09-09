@@ -1,25 +1,43 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.app.api.routes import (
     audit as audit_router,
+)
+from src.app.api.routes import (
     batch as batch_router,
+)
+from src.app.api.routes import (
     credentials as credentials_router,
+)
+from src.app.api.routes import (
     key as key_router,
+)
+from src.app.api.routes import (
     maintenance as maintenance_router,
+)
+from src.app.api.routes import (
     normalization as normalization_router,
+)
+from src.app.api.routes import (
     public as public_router,
+)
+from src.app.api.routes import (
     scan as scan_router,
 )
 from src.app.core.config import get_settings
 from src.app.core.logging_setup import get_logger, setup_logging
 from src.app.core.utils import deep_serialize
+from src.app.db.base import Base
+from src.app.db.session import get_engine, get_session_factory
+from src.app.services.job_service import JobService
 
 log = get_logger(__name__)
 
@@ -28,6 +46,17 @@ log = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     settings = get_settings()
+    try:
+        Base.metadata.create_all(bind=get_engine())
+        session = get_session_factory()()
+        try:
+            crashed_ids = JobService(session).detect_crashed_jobs()
+            if crashed_ids:
+                log.warning("Marked %d stale jobs as failed during startup", len(crashed_ids))
+        finally:
+            session.close()
+    except (RuntimeError, SQLAlchemyError, ValueError) as exc:
+        log.warning("Database schema initialization failed: %s", exc.__class__.__name__)
     log.info(
         "Starting %s env=%s debug=%s prefix=%s",
         settings.APP_NAME,

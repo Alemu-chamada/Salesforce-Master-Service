@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+from typing import ClassVar
 
 
 class JobStatus(str, enum.Enum):
@@ -35,7 +36,7 @@ ACTIVE_STATUSES = {s for s in JobStatus if s not in TERMINAL_STATUSES}
 
 
 class JobStatusTransition:
-    MAIN_CHAIN = [
+    MAIN_CHAIN: ClassVar[list[JobStatus]] = [
         JobStatus.PENDING,
         JobStatus.BATCH_REQUESTED,
         JobStatus.BATCH_PROCESSING,
@@ -65,7 +66,7 @@ class JobStatusTransition:
             return False
         from_idx = cls.MAIN_CHAIN.index(from_status)
         to_idx = cls.MAIN_CHAIN.index(to_status)
-        return 0 <= to_idx - from_idx <= 3
+        return to_idx - from_idx == 1
 
 
 class AuditEventCategory(str, enum.Enum):

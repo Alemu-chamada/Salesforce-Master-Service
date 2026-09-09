@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,74 +20,78 @@ class PaginationInfo(BaseResponse):
 
 class ScanStartRequest(BaseModel):
     organization_id: str = Field(..., min_length=1)
-    salesforce_credentials: Dict[str, Any]
-    object_names: Optional[List[str]] = None
-    processing_date: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    salesforce_credentials: dict[str, Any]
+    object_names: list[str] | None = None
+    processing_date: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ScanResumeRequest(BaseModel):
+    salesforce_credentials: dict[str, Any] | None = None
 
 
 class ScanStatusResponse(BaseResponse):
     scan_id: str
-    organization_id: Optional[str]
+    organization_id: str | None
     status: str
-    created_at: Optional[str]
-    updated_at: Optional[str]
-    completed_at: Optional[str]
-    error_message: Optional[str] = None
-    pipeline_progress: Dict[str, Any] = Field(default_factory=dict)
-    entity_record_counts: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None
+    updated_at: str | None
+    completed_at: str | None
+    error_message: str | None = None
+    pipeline_progress: dict[str, Any] = Field(default_factory=dict)
+    entity_record_counts: dict[str, Any] = Field(default_factory=dict)
 
 
 class ScanListResponse(BaseResponse):
-    items: List[Dict[str, Any]]
+    items: list[dict[str, Any]]
     pagination: PaginationInfo
 
 
 class ScanStatisticsResponse(BaseResponse):
-    counts_by_status: Dict[str, int] = Field(default_factory=dict)
+    counts_by_status: dict[str, int] = Field(default_factory=dict)
 
 
 class NormalizationOptions(BaseModel):
     output_format: str = "parquet"
     save_to_disk: bool = True
     upload_to_minio: bool = False
-    processing_date: Optional[str] = None
+    processing_date: str | None = None
 
 
 class SupportedObjectInfo(BaseResponse):
     object_name: str
-    output_tables: List[str]
+    output_tables: list[str]
 
 
 class SalesforceCredentials(BaseModel):
     grant_type: str = "password"
-    username: Optional[str] = None
-    password: Optional[str] = None
-    security_token: Optional[str] = None
-    client_id: Optional[str] = None
-    client_secret: Optional[str] = None
-    jwt_private_key: Optional[str] = None
-    jwt_subject: Optional[str] = None
-    login_url: Optional[str] = None
+    username: str | None = None
+    password: str | None = None
+    security_token: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    jwt_private_key: str | None = None
+    jwt_subject: str | None = None
+    login_url: str | None = None
 
 
 class CredentialsValidationResponse(BaseResponse):
     valid: bool
-    error: Optional[str] = None
-    identity: Optional[Dict[str, Any]] = None
+    error: str | None = None
+    identity: dict[str, Any] | None = None
 
 
 class HealthComponent(BaseResponse):
     status: str
-    latency_ms: Optional[float] = None
-    error: Optional[str] = None
+    latency_ms: float | None = None
+    error: str | None = None
 
 
 class HealthResponse(BaseResponse):
     status: str
     app_env: str
     version: str = "0.1.0"
-    components: Dict[str, HealthComponent]
+    components: dict[str, HealthComponent]
 
 
 class ServiceStatsResponse(BaseResponse):

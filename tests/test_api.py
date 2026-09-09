@@ -71,25 +71,29 @@ def test_scan_statistics_route(client):
     assert "counts_by_status" in data
 
 
-def test_unimplemented_start_returns_501(client):
+def test_start_scan_returns_accepted(client):
     payload = {
         "organization_id": "org-1",
         "salesforce_credentials": {"grant_type": "password"},
     }
     response = client.post("/api/scan/start", json=payload)
-    assert response.status_code == 501
+    assert response.status_code == 202
+    assert response.json()["status"] == "PENDING"
 
 
-def test_validate_credentials_unimplemented(client):
+def test_validate_credentials_requires_valid_credentials(client):
+    """validate-credentials is now live; submitting minimal payload returns 4xx not 501"""
     response = client.post(
         "/api/validate-credentials",
         json={"grant_type": "password"},
     )
-    assert response.status_code == 501
+    # endpoint is implemented - returns 4xx (auth error) not 501
+    assert response.status_code != 501
+    assert response.status_code in (400, 401, 422, 504)
 
 
-def test_maintenance_unimplemented(client):
+def test_maintenance_routes_are_implemented(client):
     r1 = client.post("/api/maintenance/cleanup?days_old=30")
-    assert r1.status_code == 501
+    assert r1.status_code == 200
     r2 = client.post("/api/maintenance/detect-crashed?timeout_minutes=15")
-    assert r2.status_code == 501
+    assert r2.status_code == 200

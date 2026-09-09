@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -29,7 +29,7 @@ def _auth_client() -> SalesforceAuthClient:
 def _translate(err: SalesforceAPIError) -> HTTPException:
     """Map structured Salesforce errors to HTTP statuses suitable for the API caller."""
     message = err.message
-    detail: Dict[str, Any] = {
+    detail: dict[str, Any] = {
         "detail": message,
         "error_code": err.error_code,
         "retryable": bool(err.retryable),
@@ -55,7 +55,7 @@ async def validate_credentials(
     http_request: Request,
     auth_client: SalesforceAuthClient = Depends(_auth_client),
 ) -> CredentialsValidationResponse:
-    creds: Dict[str, Any] = request.model_dump(exclude_unset=True)
+    creds: dict[str, Any] = request.model_dump(exclude_unset=True)
     try:
         result = await auth_client.validate_credentials(creds)
     except SalesforceAPIError as err:
@@ -71,7 +71,6 @@ async def validate_credentials(
         ) from err
     finally:
         auth_client.clear_cache()
-    error: Any = None
     identity = result.get("identity")
     return CredentialsValidationResponse(
         valid=bool(result.get("valid")),

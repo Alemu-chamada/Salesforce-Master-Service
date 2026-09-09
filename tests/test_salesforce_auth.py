@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as _dt
-import io
 import logging
 import re
 from pathlib import Path
@@ -13,13 +12,8 @@ import respx
 
 from src.app.core.config import get_settings
 from src.app.core.utils import utcnow
-from src.app.salesforce.auth_client import (
-    SalesforceAuthClient,
-    _CACHE_NEAR_EXPIRY_WINDOW,
-    _scrub,
-)
+from src.app.salesforce.auth_client import SalesforceAuthClient, _scrub
 from src.app.salesforce.exceptions import (
-    SalesforceAuthenticationError,
     SalesforceForbiddenError,
     SalesforceInvalidCredentialsError,
     SalesforceInvalidRequestError,
@@ -43,13 +37,12 @@ def _make_settings(**overrides):
 async def test_get_access_token_password_grant_success():
     settings = _make_settings()
     transport = MagicMock()
-    app_client = httpx.AsyncClient(transport=transport)
+    _ = httpx.AsyncClient(transport=transport)
     router = respx.MockRouter(assert_all_called=False, base_url=settings.SF_LOGIN_URL)
 
     @router.post("/services/oauth2/token")
     def _token(request):
-        data = dict(request.url.decode(request.content).items()) if hasattr(request.url, "decode") else None
-        form = httpx.QueryParams(request.content.decode()).decode()
+        form = httpx.QueryParams(request.content.decode())
         assert form["grant_type"] == "password"
         assert form["client_id"] == "test-client-id"
         assert form["username"] == "alice@example.com"
@@ -240,7 +233,7 @@ async def test_credentials_isolation_different_usernames():
     tokens = []
 
     def _handler(request):
-        data = httpx.QueryParams(request.content.decode()).decode()
+        data = httpx.QueryParams(request.content.decode())
         token = f"tok-{data['username']}"
         tokens.append(token)
         return httpx.Response(
@@ -318,7 +311,7 @@ async def test_jwt_bearer_grant_loads_private_key_from_path(tmp_path: Path):
     def _handler(request):
         calls["n"] += 1
         if request.url.path.endswith("/oauth2/token"):
-            data = httpx.QueryParams(request.content.decode()).decode()
+            data = httpx.QueryParams(request.content.decode())
             assert data["grant_type"] == "urn:ietf:params:oauth:grant-type:jwt-bearer"
             assert data["assertion"] and data["assertion"].count(".") == 2
             return httpx.Response(

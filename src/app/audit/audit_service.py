@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
-
-from sqlalchemy.orm import Session
+from typing import Any
 
 from src.app.core.logging_setup import get_logger
-from src.app.models import AuditLog, AuditEventCategory, AuditOutcome
+from src.app.models import AuditEventCategory, AuditLog, AuditOutcome
 
 log = get_logger(__name__)
 
@@ -22,22 +20,31 @@ class AuditService:
         event_category: AuditEventCategory | str,
         event_type: str,
         outcome: AuditOutcome | str = AuditOutcome.SUCCESS,
-        organization_id: Optional[str] = None,
-        actor_client_id: Optional[str] = None,
-        actor_role: Optional[str] = None,
-        entity_type: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
-        http_method: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        request_ip: Optional[str] = None,
-        status_code: Optional[int] = None,
+        organization_id: str | None = None,
+        actor_client_id: str | None = None,
+        actor_role: str | None = None,
+        entity_type: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        http_method: str | None = None,
+        endpoint: str | None = None,
+        request_ip: str | None = None,
+        status_code: int | None = None,
         severity: str = "info",
-        error_detail: Optional[str] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        error_detail: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> None:
         try:
-            db: Session = next(self._db_factory()) if callable(self._db_factory) else self._db_factory()
+            if callable(self._db_factory):
+                candidate = self._db_factory()
+                if hasattr(candidate, "add"):
+                    db = candidate
+                elif hasattr(candidate, "__next__"):
+                    db = next(candidate)
+                else:
+                    db = candidate()
+            else:
+                db = self._db_factory
             row = AuditLog(
                 event_category=AuditEventCategory(event_category)
                 if isinstance(event_category, str)
@@ -61,7 +68,7 @@ class AuditService:
             db.add(row)
             db.commit()
             db.close()
-        except Exception as exc:  # pragma: no cover - never break caller
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:  # pragma: no cover - never break caller
             log.warning("AuditService write failed: %s", exc)
 
     async def write_audit(
@@ -69,7 +76,7 @@ class AuditService:
         event_category: AuditEventCategory | str,
         event_type: str,
         outcome: AuditOutcome | str = AuditOutcome.SUCCESS,
-        organization_id: Optional[str] = None,
+        organization_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         loop = asyncio.get_event_loop()

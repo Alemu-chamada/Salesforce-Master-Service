@@ -15,6 +15,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
+COPY README.md ./
+COPY src ./src
 RUN pip install --upgrade pip \
     && pip install --no-cache-dir .
 
@@ -39,9 +41,8 @@ RUN apt-get update \
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-COPY src ./src
 COPY pyproject.toml ./
-RUN pip install --no-deps --no-cache-dir -e .
+COPY src ./src
 
 USER appuser
 

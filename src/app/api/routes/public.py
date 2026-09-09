@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
 
 from fastapi import APIRouter
 
@@ -10,6 +9,7 @@ from src.app.core.logging_setup import get_logger
 from src.app.core.utils import utcnow
 from src.app.db.session import check_db_connectivity
 from src.app.schemas.common import HealthComponent, HealthResponse, ServiceStatsResponse
+from src.app.storage.minio_client import MinIOClient
 
 router = APIRouter()
 
@@ -22,7 +22,7 @@ _REQUEST_COUNTER = 0
 @router.get("/health")
 async def health() -> HealthResponse:
     settings = get_settings()
-    components: Dict[str, HealthComponent] = {}
+    components: dict[str, HealthComponent] = {}
 
     if settings.HEALTH_CHECK_DB_ENABLED:
         t0 = time.perf_counter()
@@ -35,9 +35,13 @@ async def health() -> HealthResponse:
         )
 
     if settings.HEALTH_CHECK_MINIO_ENABLED:
+        minio = MinIOClient(settings.MINIO_ENDPOINT, settings.MINIO_ACCESS_KEY, settings.MINIO_SECRET_KEY, settings.MINIO_BUCKET, settings.MINIO_SECURE)
+        t0 = time.perf_counter()
+        minio_ok = minio.check_connectivity()
         components["minio"] = HealthComponent(
-            status="degraded",
-            error="MinIO client not wired in Phase 1",
+            status="healthy" if minio_ok else "unhealthy",
+            latency_ms=round((time.perf_counter() - t0) * 1000, 2) if minio_ok else None,
+            error=None if minio_ok else "MinIO connectivity failed",
         )
 
     overall = "healthy"
