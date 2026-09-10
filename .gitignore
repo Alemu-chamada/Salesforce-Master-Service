@@ -59,3 +59,9 @@ Thumbs.db
 # Project data
 data/scans/
 data/tmp/
+
+# Salesforce JWT private key
+salesforce.key
+
+# Runtime logs
+*.log

@@ -116,7 +116,7 @@ async def test_create_query_job_happy_path():
         import json as _json
         body = _json.loads(request.content)
         assert body["operation"] == "query"
-        assert body["object"] == "Account"
+        assert "object" not in body
         assert "SELECT Id, Name" in body["query"]
         return httpx.Response(200, json=job_state)
 
