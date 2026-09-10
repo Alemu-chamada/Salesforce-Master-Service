@@ -96,7 +96,6 @@ class SalesforceBatchAPIClient:
             )
         body = {
             "operation": operation_clean,
-            "object": object_name,
             "query": soql,
             "contentType": "CSV",
             "columnDelimiter": column_delimiter,

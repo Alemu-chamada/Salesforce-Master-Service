@@ -141,12 +141,6 @@ class BatchPollingService:
                     write_to_dlq("salesforce", f"get_job_results:{object_name}", {"job_id": job_id}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id)
                 raise
             paths[object_name], sizes[object_name] = info["path"], info["file_size"]
-            try:
-                await retry_call(batch_client.close_job, job_id, op_label=f"close_job:{object_name}")
-            except Exception as exc:
-                if getattr(exc, "retryable", False):
-                    write_to_dlq("salesforce", f"close_job:{object_name}", {"job_id": job_id}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id)
-                raise
             self.job_service.update_heartbeat(scan_id)
         self.job_service.update_download_info(scan_id, paths, sizes)
         self.job_service.update_job_status(scan_id, JobStatus.DOWNLOADED)

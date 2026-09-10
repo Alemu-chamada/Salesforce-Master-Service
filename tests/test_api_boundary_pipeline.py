@@ -39,7 +39,7 @@ class FakeBatchClient:
         yield b"Id,Name,Status\n00Q,Ada,Open\n"
 
     async def close_job(self, job_id):
-        return {"job_id": job_id, "state": "Closed"}
+        raise AssertionError("completed Bulk API query jobs must not be closed after download")
 
 
 class FakeMinio:

@@ -101,6 +101,17 @@ def test_valid_coordinator_signature_passes():
         assert r.json()["client_id"] == "coordinator"
 
 
+def test_valid_normalization_write_signature_is_checked_once():
+    app = _make_app()
+    path = "/api/normalization/missing-scan/normalize"
+    body = b'{"output_format":"parquet","save_to_disk":true,"upload_to_minio":false}'
+    with TestClient(app) as c:
+        hdrs = _headers("POST", path, body=body)
+        r = c.post(path, content=body, headers={**hdrs, "Content-Type": "application/json"})
+        assert r.status_code == 409
+        assert "nonce_replayed" not in r.text
+
+
 def test_missing_headers_returns_401():
     app = _make_app()
     with TestClient(app) as c:

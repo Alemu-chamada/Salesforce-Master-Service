@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 
 from src.app.security.hmac import HMACAuthData, hmac_auth_readonly
 
-router = APIRouter(dependencies=[Depends(hmac_auth_readonly)])
+router = APIRouter()
 
 
 @router.get("/verify")
