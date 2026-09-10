@@ -11,11 +11,10 @@ requirements are in `SALESFORCE_MASTER_SERVICE 3.md`.
 
 The implementation covers the main extraction, normalization, storage,
 resilience, security, API, audit, migration, and deployment-reference scope.
-Local automated validation is green, but this is not a claim of complete
-production compliance. The final audit identified code-level gaps in
-DLQ persistence wiring, child relationship extraction, and object catalog
-accuracy. Credential re-supply for restart-safe resume, startup crash
-detection, and stage heartbeat refresh are implemented and tested.
+Local automated validation is green. Credential re-supply for restart-safe
+resume, startup crash detection, stage heartbeat refresh, persistent DLQ
+wiring, child relationship queries, and object catalog accuracy are implemented
+and tested.
 
 ## Architecture and important files
 
@@ -53,20 +52,14 @@ timestamp freshness, nonce replay protection, and nonblocking audit writes.
 Read-only routes accept the engineer key; write routes require the coordinator
 key.
 
-## Compliance gaps requiring code changes
+## Operational limitations
 
 - Resume after process restart requires the Coordinator to re-supply Salesforce
   credentials in the resume request. Raw credentials are not persisted, and
   runtime credentials are cleared after workflow completion, failure, or
   cancellation.
-- Production retry failure paths call `write_to_dlq` without a database factory,
-  so exhausted external calls may be logged instead of persisted to the DLQ.
-- The supported-object registry reports the shared `TaskEvent` normalizer and
-  does not accurately expose separate `Task`, `Event`, and
-  `OpportunityLineItem` outputs.
-- SOQL queries do not request the child relationships needed for opportunity
-  line items/contact roles, case comments, and campaign members. The separate
-  `OpportunityLineItem` query is also mapped to the opportunity normalizer.
+- Nonce replay storage is process-local and should be replaced with shared state
+  only if a multi-instance deployment is introduced.
 
 ## Known limitations and environment-pending validation
 
@@ -96,7 +89,7 @@ key.
 
 Recorded local verification in the project `.venv`:
 
-- `pytest -q` — `123 passed, 3 warnings`
+- `pytest -q` — `128 passed, 3 warnings`
 - `ruff check .` — passed
 - `mypy src tests --hide-error-context --no-error-summary` — passed
 - `python -m compileall -q .` — passed

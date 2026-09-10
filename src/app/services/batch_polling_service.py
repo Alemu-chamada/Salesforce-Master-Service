@@ -64,7 +64,7 @@ class BatchPollingService:
                 )
             except Exception as exc:
                 if getattr(exc, "retryable", False):
-                    write_to_dlq("salesforce", operation, {"object_name": object_name}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, organization_id, scan_id)
+                    write_to_dlq("salesforce", operation, {"object_name": object_name}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, organization_id, scan_id, db_factory=get_session_factory)
                 raise
             ids.append({"object_name": object_name, "job_id": result["job_id"]})
             statuses[object_name] = result.get("state", "UploadComplete")
@@ -87,7 +87,7 @@ class BatchPollingService:
                 status = await retry_call(self.batch_client.get_job_status, job_id, op_label=operation)
             except Exception as exc:
                 if getattr(exc, "retryable", False):
-                    write_to_dlq("salesforce", operation, {"job_id": job_id}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id)
+                    write_to_dlq("salesforce", operation, {"job_id": job_id}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id, db_factory=get_session_factory)
                 raise
             state = status.get("state", "Unknown")
             statuses[name] = status
@@ -138,7 +138,7 @@ class BatchPollingService:
                 info = await retry_call(_download, job_id, object_name, op_label=f"get_job_results:{object_name}")
             except Exception as exc:
                 if getattr(exc, "retryable", False):
-                    write_to_dlq("salesforce", f"get_job_results:{object_name}", {"job_id": job_id}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id)
+                    write_to_dlq("salesforce", f"get_job_results:{object_name}", {"job_id": job_id}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id, db_factory=get_session_factory)
                 raise
             paths[object_name], sizes[object_name] = info["path"], info["file_size"]
             self.job_service.update_heartbeat(scan_id)

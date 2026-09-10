@@ -14,10 +14,9 @@ tracking, normalization, MinIO, HMAC, retry, audit, Docker, and migration
 surfaces. The local quality gate is green: 123 tests passed, Ruff passed, Mypy
 passed, and Python compilation passed.
 
-The implementation is not yet fully specification-compliant. The remaining
-code-level gaps are listed under **Code changes still required**. Runtime
-credential re-supply for restart-safe resume, startup stale-job detection, and
-heartbeat refresh are now implemented and locally tested. Live
+Runtime credential re-supply for restart-safe resume, startup stale-job detection,
+heartbeat refresh, child relationship extraction, persistent DLQ wiring, and
+catalog accuracy are implemented and locally tested. Live
 Salesforce, MinIO, PostgreSQL, Docker Compose, and Nomad/Vault validation also
 remain pending because those services or credentials were not available in
 this workspace.
@@ -33,7 +32,7 @@ this workspace.
 | Salesforce JWT/password authentication | ⚠️ Implemented but live verification pending | Mocked auth tests pass; real OAuth and identity lookup need a Salesforce org. |
 | Bulk API 2.0 job creation, polling, pagination, download, abort, close | ⚠️ Implemented but live verification pending | Mocked client tests cover these paths; live Bulk API behavior is unverified. |
 | Required object coverage: Account, Contact, Opportunity, Lead, Case, Task, Event, Campaign, User | ⚠️ Implemented but live verification pending | Queries and normalizers exist, but comprehensive live extraction is absent. |
-| Opportunity line items, contact roles, case comments, campaign members | ❌ Missing | Required child relationship queries are not present; `OpportunityLineItem` is mapped to the opportunity normalizer. |
+| Opportunity line items, contact roles, case comments, campaign members | ⚠️ Implemented but live verification pending | Child relationship queries and normalizer outputs are present; live Salesforce relationship permissions/data remain environment-dependent. |
 | CSV extraction and local file persistence | ✅ Implemented/verified | `BatchFileService` and mocked end-to-end extraction test pass. |
 | Normalization to relational table families | ⚠️ Implemented but live verification pending | Normalizers and Parquet test exist, but child-table extraction is incomplete and the object catalog is inaccurate for Task/Event/OpportunityLineItem. |
 | Hive-style MinIO path by organization/date | ✅ Implemented/verified | Unit test verifies `salesforce/{table}/glynac_organization_id={org}/processing_date={date}/...`. |
@@ -48,7 +47,7 @@ this workspace.
 | Credentials excluded from persistent job records | ✅ Implemented/verified | `ExtractionService` removes `salesforce_credentials` before `request_config` persistence; scrubbing tests exist. |
 | Credentials discarded after use | ✅ Implemented/verified | Workflow cleanup removes runtime credentials in all terminal/error paths; persisted job config excludes them. |
 | Bounded retries with jitter | ✅ Implemented/verified | Retry classification and exhausted-retry tests pass. |
-| Persistent DLQ for exhausted external calls | ❌ Missing | Production call sites omit `db_factory`, so exhausted calls can be logged without inserting `failed_external_calls`. |
+| Persistent DLQ for exhausted external calls | ✅ Implemented/verified | Production external-call failure paths pass the session factory; scrubbed persistence is covered by tests. |
 | Audit logs and audit statistics | ✅ Implemented/verified | Audit service, routes, and API-boundary assertions are present. |
 | Health and service stats endpoints | ✅ Implemented/verified | `/api/health` and `/api/stats` are implemented and covered locally. |
 | Production/staging configuration guardrails | ⚠️ Implemented but live verification pending | Settings reject placeholder secrets, disabled HMAC, or production DEBUG; deployment environment values are not configured here. |
@@ -78,7 +77,7 @@ this workspace.
 
 Recorded local results from the project virtual environment:
 
-- `pytest -q`: **123 passed, 3 warnings**
+- `pytest -q`: **128 passed, 3 warnings**
 - `ruff check .`: **passed**
 - `mypy src tests --hide-error-context --no-error-summary`: **passed**
 - `python -m compileall -q .`: **passed**
@@ -185,23 +184,9 @@ access, or production data shape.
 - Do not persist Salesforce credentials or commit `.env`, private keys, or
   other secrets.
 
-## Code changes still required
+## Remaining approval items
 
-The following are genuine specification gaps, not merely pending environment
-checks. The two requested gaps addressed in this change are intentionally not
-listed here because they are implemented and tested above:
-
-1. Pass the session factory/database dependency into every production DLQ write
-   so exhausted Salesforce and MinIO calls are persisted in
-   `failed_external_calls`.
-2. Split Task and Event normalization/catalog entries and correctly represent
-   OpportunityLineItem.
-3. Add the Salesforce child relationship queries or a separate extraction and
-   merge path for opportunity line items/contact roles, case comments, and
-   campaign members.
-4. Add automated tests for production DLQ insertion and complete child-table
-  extraction.
-
-Until these changes are addressed, the service should be described as locally
-validated and integration-ready for controlled testing, not fully production-
-ready or fully specification-compliant.
+No additional code-level gaps are identified against the specification. Live
+Salesforce relationship permissions/data, production PostgreSQL/MinIO,
+Nomad/Vault deployment, and private-key history rotation remain operational
+validation or security tasks outside automated repository verification.

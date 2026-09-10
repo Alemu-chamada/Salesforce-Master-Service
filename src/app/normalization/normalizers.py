@@ -163,11 +163,24 @@ class UserNormalizer(BaseNormalizer):
         return {"users": [self._row(record, ["Id", "Username", "FirstName", "LastName", "Name", "Email", "IsActive", "UserRoleId", "ProfileId", "Department", "Title", "CreatedDate", "LastModifiedDate"]) for record in records]}
 
 
+class OpportunityLineItemNormalizer(BaseNormalizer):
+    object_name: ClassVar[str] = "OpportunityLineItem"
+    output_tables: ClassVar[list[str]] = ["opportunity_line_items"]
+
+    def normalize(self, records):
+        return {
+            "opportunity_line_items": [
+                {"opportunity_id": self.safe_get(record, "OpportunityId"), **self._row(record, ["Id", "Product2Id", "ProductCode", "Name", "Quantity", "UnitPrice", "TotalPrice", "ServiceDate"])}
+                for record in records
+            ]
+        }
+
+
 NORMALIZER_REGISTRY: dict[str, BaseNormalizer] = {
     "Account": AccountNormalizer(),
     "Contact": ContactNormalizer(),
     "Opportunity": OpportunityNormalizer(),
-    "OpportunityLineItem": OpportunityNormalizer(),
+    "OpportunityLineItem": OpportunityLineItemNormalizer(),
     "Lead": LeadNormalizer(),
     "Case": CaseNormalizer(),
     "Task": TaskEventNormalizer(),
@@ -177,5 +190,14 @@ NORMALIZER_REGISTRY: dict[str, BaseNormalizer] = {
 }
 
 SUPPORTED_OBJECTS_CATALOG: dict[str, list[str]] = {
-    n.object_name: n.output_tables for n in NORMALIZER_REGISTRY.values()
+    "Account": AccountNormalizer.output_tables,
+    "Contact": ContactNormalizer.output_tables,
+    "Opportunity": OpportunityNormalizer.output_tables,
+    "OpportunityLineItem": OpportunityLineItemNormalizer.output_tables,
+    "Lead": LeadNormalizer.output_tables,
+    "Case": CaseNormalizer.output_tables,
+    "Task": TaskEventNormalizer.output_tables,
+    "Event": TaskEventNormalizer.output_tables,
+    "Campaign": CampaignNormalizer.output_tables,
+    "User": UserNormalizer.output_tables,
 }

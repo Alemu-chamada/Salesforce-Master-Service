@@ -40,6 +40,16 @@ class FakePolling:
         return info
 
 
+class FakeMinio:
+    def upload_normalized_data(self, scan_id, organization_id, processing_date, tables):
+        return [
+            (
+                f"salesforce/leads/glynac_organization_id={organization_id}/"
+                f"processing_date={processing_date}/leads.parquet"
+            )
+        ]
+
+
 @pytest.mark.asyncio
 async def test_mocked_pipeline_reaches_extracted_then_normalized(tmp_path):
     engine = create_engine("sqlite:///:memory:")
@@ -90,6 +100,87 @@ async def test_resume_accepts_credentials_after_process_restart(tmp_path):
     )
     assert result["scan_id"] == "scan-restart"
     assert "salesforce_credentials" not in jobs.get_job("scan-restart").request_config
+
+
+@pytest.mark.asyncio
+async def test_cancelled_extracted_scan_resumes_at_extracted_checkpoint(tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    jobs = JobService(session)
+    files = BatchFileService(str(tmp_path))
+    polling = FakePolling(jobs, files)
+    extraction = ExtractionService(session, jobs, polling_service=polling, file_service=files)
+
+    jobs.create_job("scan-cancelled-extracted", "org-1", {"object_names": ["Lead"]})
+    info = files.save_results_to_disk(
+        "scan-cancelled-extracted", "Lead", iter(["Id,Name,Status\n", "00Q,Ada,Open\n"])
+    )
+    jobs.update_download_info(
+        "scan-cancelled-extracted", {"Lead": info["path"]}, {"Lead": info["file_size"]}
+    )
+    jobs.update_extraction_info("scan-cancelled-extracted", {"Lead": 1})
+    jobs.cancel_job("scan-cancelled-extracted", reason="test")
+
+    result = await extraction.resume_scan(
+        "scan-cancelled-extracted",
+        {"grant_type": "password", "username": "mock-user", "password": "discarded"},
+    )
+
+    assert result == {"scan_id": "scan-cancelled-extracted", "status": JobStatus.EXTRACTED.value}
+    assert jobs.get_job("scan-cancelled-extracted").status == JobStatus.EXTRACTED
+
+    # A worker that was already running before cancellation must not advance
+    # the resumed checkpoint or restart extraction from an obsolete state.
+    await extraction._execute_batch_workflow("scan-cancelled-extracted", ["Lead"])
+    assert jobs.get_job("scan-cancelled-extracted").status == JobStatus.EXTRACTED
+
+    normalized = await NormalizationService(
+        session, jobs, file_service=files, minio_client=FakeMinio()
+    ).normalize_scan(
+        "scan-cancelled-extracted", upload_to_minio=True, processing_date="2026-09-10"
+    )
+    assert normalized["status"] == JobStatus.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_cancelled_downloaded_scan_resumes_worker_and_completes(tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    jobs = JobService(session)
+    files = BatchFileService(str(tmp_path))
+    polling = FakePolling(jobs, files)
+    extraction = ExtractionService(session, jobs, polling_service=polling, file_service=files)
+
+    jobs.create_job("scan-cancelled-downloaded", "org-1", {"object_names": ["Lead"]})
+    info = files.save_results_to_disk(
+        "scan-cancelled-downloaded", "Lead", iter(["Id,Name,Status\n", "00Q,Ada,Open\n"])
+    )
+    jobs.update_download_info(
+        "scan-cancelled-downloaded", {"Lead": info["path"]}, {"Lead": info["file_size"]}
+    )
+    jobs.cancel_job("scan-cancelled-downloaded", reason="test")
+
+    # A stale worker must exit while the job is still cancelled.
+    await extraction._execute_batch_workflow("scan-cancelled-downloaded", ["Lead"])
+    assert jobs.get_job("scan-cancelled-downloaded").status == JobStatus.CANCELLED
+    assert jobs.get_job("scan-cancelled-downloaded").extracted_at is None
+
+    result = await extraction.resume_scan(
+        "scan-cancelled-downloaded",
+        {"grant_type": "password", "username": "mock-user", "password": "discarded"},
+    )
+    assert result["status"] == JobStatus.EXTRACTING.value
+    await extraction._execute_batch_workflow("scan-cancelled-downloaded", ["Lead"])
+    assert jobs.get_job("scan-cancelled-downloaded").status == JobStatus.EXTRACTED
+
+    normalized = await NormalizationService(
+        session, jobs, file_service=files, minio_client=FakeMinio()
+    ).normalize_scan(
+        "scan-cancelled-downloaded", upload_to_minio=True, processing_date="2026-09-10"
+    )
+    assert normalized["status"] == JobStatus.COMPLETED.value
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from src.app.normalization.normalizers import AccountNormalizer, LeadNormalizer
+from src.app.normalization.normalizers import (
+    SUPPORTED_OBJECTS_CATALOG,
+    AccountNormalizer,
+    LeadNormalizer,
+    OpportunityLineItemNormalizer,
+    OpportunityNormalizer,
+)
+from src.app.salesforce.queries import query_for
 from src.app.services.batch_file_service import BatchFileService
 from src.app.storage.minio_client import MinIOClient
 
@@ -23,6 +30,32 @@ def test_normalizers_preserve_ids_and_relationships():
     leads = LeadNormalizer().normalize([{"Id": "00Q", "Name": "Ada", "Status": "Open"}])
     assert leads["leads"][0]["id"] == "00Q"
     assert leads["leads"][0]["status"] == "Open"
+
+
+def test_child_queries_and_normalizers_preserve_relationships():
+    opportunity_query = query_for("Opportunity")
+    assert "FROM OpportunityLineItems" in opportunity_query
+    assert "FROM OpportunityContactRoles" in opportunity_query
+    assert "FROM CaseComments" in query_for("Case")
+    assert "FROM CampaignMembers" in query_for("Campaign")
+
+    opportunity_tables = OpportunityNormalizer().normalize([
+        {
+            "Id": "006",
+            "OpportunityLineItems": {"records": [{"Id": "00k", "OpportunityId": "006", "Name": "Widget"}]},
+            "OpportunityContactRoles": {"records": [{"Id": "ocr", "ContactId": "003", "Role": "Decision Maker"}]},
+        }
+    ])
+    assert opportunity_tables["opportunity_line_items"][0]["id"] == "00k"
+    assert opportunity_tables["opportunity_contact_roles"][0]["contactid"] == "003"
+
+    line_item_tables = OpportunityLineItemNormalizer().normalize([
+        {"Id": "00k", "OpportunityId": "006", "Name": "Widget"}
+    ])
+    assert line_item_tables["opportunity_line_items"][0]["opportunity_id"] == "006"
+    assert SUPPORTED_OBJECTS_CATALOG["Task"] == ["tasks", "events"]
+    assert SUPPORTED_OBJECTS_CATALOG["Event"] == ["tasks", "events"]
+    assert SUPPORTED_OBJECTS_CATALOG["OpportunityLineItem"] == ["opportunity_line_items"]
 
 
 def test_minio_upload_uses_required_partition_key(monkeypatch, tmp_path):
