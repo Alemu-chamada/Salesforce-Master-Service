@@ -63,5 +63,20 @@ data/tmp/
 # Salesforce JWT private key
 salesforce.key
 
+# Local agent/session artifacts
+.kiro/
+chat.json
+
+# Local Salesforce certificate and key material
+salesforce.crt
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Environment variants
+.env.*
+!.env.example
+
 # Runtime logs
 *.log
