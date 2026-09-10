@@ -68,7 +68,7 @@ class NormalizationService:
                 try:
                     keys = self.minio_client.upload_normalized_data(scan_id, job.organization_id or "unknown", date, paths)
                 except Exception as exc:
-                    write_to_dlq("minio", "upload_normalized_data", {"scan_id": scan_id, "tables": list(paths)}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id)
+                    write_to_dlq("minio", "upload_normalized_data", {"scan_id": scan_id, "tables": list(paths)}, get_settings().EXTERNAL_CALL_MAX_RETRIES + 1, exc, job.organization_id, scan_id, db_factory=get_session_factory)
                     self.audit.write_audit_nonblocking("external", "minio_upload_failure", outcome="failure", organization_id=job.organization_id, resource_id=scan_id, error_detail=str(exc)[:4000])
                     raise
                 self.job_service.complete_minio_upload(scan_id, {str(index): key for index, key in enumerate(keys)})

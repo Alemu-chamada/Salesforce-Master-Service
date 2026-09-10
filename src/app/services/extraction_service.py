@@ -45,6 +45,8 @@ class ExtractionService:
             job = self.job_service.get_job(scan_id)
             if job is None:
                 raise ValueError(f"scan {scan_id} not found")
+            if job.status == JobStatus.CANCELLED:
+                return
             if job.extracted_at:
                 return
             await self.polling_service.configure(self._runtime_credentials[scan_id])
@@ -81,11 +83,21 @@ class ExtractionService:
             self._runtime_credentials[scan_id] = dict(salesforce_credentials)
         if scan_id not in self._runtime_credentials:
             raise RuntimeError("Salesforce credentials must be supplied when resuming after a restart")
+        target = job.status
         if job.status in {JobStatus.FAILED, JobStatus.CANCELLED}:
-            target = JobStatus.EXTRACTING if job.downloaded_at else JobStatus.BATCH_PROCESSING if job.batch_job_ids else JobStatus.PENDING
+            target = (
+                JobStatus.EXTRACTED
+                if job.extracted_at
+                else JobStatus.EXTRACTING
+                if job.downloaded_at
+                else JobStatus.BATCH_PROCESSING
+                if job.batch_job_ids
+                else JobStatus.PENDING
+            )
             if self.job_service.resume_job(scan_id, target) is None:
                 raise RuntimeError("scan cannot be resumed from its persisted state")
-        asyncio.create_task(self._execute_batch_workflow(scan_id))
+        if target != JobStatus.EXTRACTED:
+            asyncio.create_task(self._execute_batch_workflow(scan_id))
         return {"scan_id": scan_id, "status": job.status.value}
 
     async def cancel_scan(self, scan_id: str, reason: str | None = None) -> dict[str, Any]:
