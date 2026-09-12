@@ -89,22 +89,14 @@ class ContactNormalizer(BaseNormalizer):
 
 class OpportunityNormalizer(BaseNormalizer):
     object_name: ClassVar[str] = "Opportunity"
-    output_tables: ClassVar[list[str]] = [
-        "opportunities",
-        "opportunity_line_items",
-        "opportunity_contact_roles",
-    ]
+    output_tables: ClassVar[list[str]] = ["opportunities"]
 
     def normalize(self, records):
-        opportunities, line_items, roles = [], [], []
+        opportunities = []
         for record in records:
             opportunity = self._row(record, ["Id", "AccountId", "Name", "StageName", "Amount", "CloseDate", "Probability", "Type", "LeadSource", "OwnerId", "CreatedDate", "LastModifiedDate"])
             opportunities.append(opportunity)
-            for item in self._children(record, "OpportunityLineItems"):
-                line_items.append({"opportunity_id": opportunity["id"], **self._row(item, ["Id", "Product2Id", "ProductCode", "Name", "Quantity", "UnitPrice", "TotalPrice", "ServiceDate"])})
-            for role in self._children(record, "OpportunityContactRoles"):
-                roles.append({"opportunity_id": opportunity["id"], **self._row(role, ["ContactId", "Role", "IsPrimary"])})
-        return {"opportunities": opportunities, "opportunity_line_items": line_items, "opportunity_contact_roles": roles}
+        return {"opportunities": opportunities}
 
 
 class LeadNormalizer(BaseNormalizer):
@@ -117,16 +109,14 @@ class LeadNormalizer(BaseNormalizer):
 
 class CaseNormalizer(BaseNormalizer):
     object_name: ClassVar[str] = "Case"
-    output_tables: ClassVar[list[str]] = ["cases", "case_comments"]
+    output_tables: ClassVar[list[str]] = ["cases"]
 
     def normalize(self, records):
-        cases, comments = [], []
+        cases = []
         for record in records:
             case = self._row(record, ["Id", "AccountId", "ContactId", "CaseNumber", "Subject", "Description", "Status", "Priority", "Origin", "Type", "Reason", "OwnerId", "CreatedDate", "LastModifiedDate"])
             cases.append(case)
-            for comment in self._children(record, "CaseComments"):
-                comments.append({"case_id": case["id"], **self._row(comment, ["Id", "CommentBody", "CreatedDate", "CreatedById"])})
-        return {"cases": cases, "case_comments": comments}
+        return {"cases": cases}
 
 
 class TaskEventNormalizer(BaseNormalizer):
@@ -143,16 +133,53 @@ class TaskEventNormalizer(BaseNormalizer):
 
 class CampaignNormalizer(BaseNormalizer):
     object_name: ClassVar[str] = "Campaign"
-    output_tables: ClassVar[list[str]] = ["campaigns", "campaign_members"]
+    output_tables: ClassVar[list[str]] = ["campaigns"]
 
     def normalize(self, records):
-        campaigns, members = [], []
+        campaigns = []
         for record in records:
             campaign = self._row(record, ["Id", "Name", "Type", "Status", "StartDate", "EndDate", "IsActive", "OwnerId", "CreatedDate", "LastModifiedDate"])
             campaigns.append(campaign)
-            for member in self._children(record, "CampaignMembers"):
-                members.append({"campaign_id": campaign["id"], **self._row(member, ["Id", "LeadId", "ContactId", "Status", "HasResponded", "FirstRespondedDate"])})
-        return {"campaigns": campaigns, "campaign_members": members}
+        return {"campaigns": campaigns}
+
+
+class OpportunityContactRoleNormalizer(BaseNormalizer):
+    object_name: ClassVar[str] = "OpportunityContactRole"
+    output_tables: ClassVar[list[str]] = ["opportunity_contact_roles"]
+
+    def normalize(self, records):
+        return {
+            "opportunity_contact_roles": [
+                {"opportunity_id": self.safe_get(record, "OpportunityId"), **self._row(record, ["Id", "ContactId", "Role", "IsPrimary"])}
+                for record in records
+            ]
+        }
+
+
+class CaseCommentNormalizer(BaseNormalizer):
+    object_name: ClassVar[str] = "CaseComment"
+    output_tables: ClassVar[list[str]] = ["case_comments"]
+
+    def normalize(self, records):
+        return {
+            "case_comments": [
+                {"case_id": self.safe_get(record, "ParentId"), **self._row(record, ["Id", "CommentBody", "CreatedDate", "CreatedById"])}
+                for record in records
+            ]
+        }
+
+
+class CampaignMemberNormalizer(BaseNormalizer):
+    object_name: ClassVar[str] = "CampaignMember"
+    output_tables: ClassVar[list[str]] = ["campaign_members"]
+
+    def normalize(self, records):
+        return {
+            "campaign_members": [
+                {"campaign_id": self.safe_get(record, "CampaignId"), **self._row(record, ["Id", "LeadId", "ContactId", "Status", "HasResponded", "FirstRespondedDate"])}
+                for record in records
+            ]
+        }
 
 
 class UserNormalizer(BaseNormalizer):
@@ -181,11 +208,14 @@ NORMALIZER_REGISTRY: dict[str, BaseNormalizer] = {
     "Contact": ContactNormalizer(),
     "Opportunity": OpportunityNormalizer(),
     "OpportunityLineItem": OpportunityLineItemNormalizer(),
+    "OpportunityContactRole": OpportunityContactRoleNormalizer(),
     "Lead": LeadNormalizer(),
     "Case": CaseNormalizer(),
+    "CaseComment": CaseCommentNormalizer(),
     "Task": TaskEventNormalizer(),
     "Event": TaskEventNormalizer(),
     "Campaign": CampaignNormalizer(),
+    "CampaignMember": CampaignMemberNormalizer(),
     "User": UserNormalizer(),
 }
 
@@ -194,10 +224,13 @@ SUPPORTED_OBJECTS_CATALOG: dict[str, list[str]] = {
     "Contact": ContactNormalizer.output_tables,
     "Opportunity": OpportunityNormalizer.output_tables,
     "OpportunityLineItem": OpportunityLineItemNormalizer.output_tables,
+    "OpportunityContactRole": OpportunityContactRoleNormalizer.output_tables,
     "Lead": LeadNormalizer.output_tables,
     "Case": CaseNormalizer.output_tables,
+    "CaseComment": CaseCommentNormalizer.output_tables,
     "Task": TaskEventNormalizer.output_tables,
     "Event": TaskEventNormalizer.output_tables,
     "Campaign": CampaignNormalizer.output_tables,
+    "CampaignMember": CampaignMemberNormalizer.output_tables,
     "User": UserNormalizer.output_tables,
 }

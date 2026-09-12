@@ -63,11 +63,14 @@ _DEFAULT_OBJECTS = [
     "Contact",
     "Opportunity",
     "OpportunityLineItem",
+    "OpportunityContactRole",
     "Lead",
     "Case",
+    "CaseComment",
     "Task",
     "Event",
     "Campaign",
+    "CampaignMember",
     "User",
 ]
 

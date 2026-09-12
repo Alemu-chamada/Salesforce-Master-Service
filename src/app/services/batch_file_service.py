@@ -45,34 +45,47 @@ class BatchFileService:
         self, scan_id: str, object_name: str, csv_stream: Iterator[str]
     ) -> dict[str, Any]:
         path = self._safe_file(scan_id, object_name)
+        tmp_path = path.with_name(f"{path.name}.part")
         rows = 0
         size = 0
-        with path.open("wb") as output:
-            for chunk in csv_stream:
-                data = chunk.encode("utf-8") if isinstance(chunk, str) else bytes(chunk)
-                output.write(data)
-                size += len(data)
         try:
-            with path.open("r", encoding="utf-8-sig", newline="") as source:
-                rows = max(0, sum(1 for _ in csv.DictReader(source)))
-        except (UnicodeError, csv.Error) as exc:
-            path.unlink(missing_ok=True)
-            raise ValueError(f"malformed CSV for {object_name}: {exc}") from exc
+            with tmp_path.open("wb") as output:
+                for chunk in csv_stream:
+                    data = chunk.encode("utf-8") if isinstance(chunk, str) else bytes(chunk)
+                    output.write(data)
+                    size += len(data)
+            try:
+                with tmp_path.open("r", encoding="utf-8-sig", newline="") as source:
+                    rows = max(0, sum(1 for _ in csv.DictReader(source)))
+            except (UnicodeError, csv.Error) as exc:
+                tmp_path.unlink(missing_ok=True)
+                raise ValueError(f"malformed CSV for {object_name}: {exc}") from exc
+            tmp_path.replace(path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
         return {"object_name": object_name, "path": str(path), "file_size": size, "record_count": rows}
 
     async def save_async_results_to_disk(self, scan_id: str, object_name: str, csv_stream: Any) -> dict[str, Any]:
         path = self._safe_file(scan_id, object_name)
+        tmp_path = path.with_name(f"{path.name}.part")
         size = 0
+        rows = 0
         try:
-            with path.open("wb") as output:
+            with tmp_path.open("wb") as output:
                 async for chunk in csv_stream:
                     data = chunk.encode("utf-8") if isinstance(chunk, str) else bytes(chunk)
                     output.write(data)
                     size += len(data)
-            with path.open("r", encoding="utf-8-sig", newline="") as source:
-                rows = max(0, sum(1 for _ in csv.DictReader(source)))
+            try:
+                with tmp_path.open("r", encoding="utf-8-sig", newline="") as source:
+                    rows = max(0, sum(1 for _ in csv.DictReader(source)))
+            except (UnicodeError, csv.Error) as exc:
+                tmp_path.unlink(missing_ok=True)
+                raise ValueError(f"malformed CSV for {object_name}: {exc}") from exc
+            tmp_path.replace(path)
         except Exception:
-            path.unlink(missing_ok=True)
+            tmp_path.unlink(missing_ok=True)
             raise
         return {"object_name": object_name, "path": str(path), "file_size": size, "record_count": rows}
 
