@@ -11,11 +11,13 @@ identified as local verification; they are not live integration evidence.
 
 The service implements the principal FastAPI, Salesforce Bulk API, job
 tracking, normalization, MinIO, HMAC, retry, audit, Docker, and migration
-surfaces. The local quality gate is green: 123 tests passed, Ruff passed, Mypy
-passed, and Python compilation passed.
+surfaces. The latest local quality gate is green: 129 tests passed, Ruff
+passed, Mypy passed, Python compilation passed, Docker Compose configuration
+passed, and `git diff --check` passed.
 
 Runtime credential re-supply for restart-safe resume, startup stale-job detection,
-heartbeat refresh, child relationship extraction, persistent DLQ wiring, and
+heartbeat refresh, separate child-object extraction, atomic result downloads,
+persistent DLQ wiring, and
 catalog accuracy are implemented and locally tested. Live
 Salesforce, MinIO, PostgreSQL, Docker Compose, and Nomad/Vault validation also
 remain pending because those services or credentials were not available in
@@ -32,9 +34,9 @@ this workspace.
 | Salesforce JWT/password authentication | ⚠️ Implemented but live verification pending | Mocked auth tests pass; real OAuth and identity lookup need a Salesforce org. |
 | Bulk API 2.0 job creation, polling, pagination, download, abort, close | ⚠️ Implemented but live verification pending | Mocked client tests cover these paths; live Bulk API behavior is unverified. |
 | Required object coverage: Account, Contact, Opportunity, Lead, Case, Task, Event, Campaign, User | ⚠️ Implemented but live verification pending | Queries and normalizers exist, but comprehensive live extraction is absent. |
-| Opportunity line items, contact roles, case comments, campaign members | ⚠️ Implemented but live verification pending | Child relationship queries and normalizer outputs are present; live Salesforce relationship permissions/data remain environment-dependent. |
+| Opportunity line items, contact roles, case comments, campaign members | ⚠️ Implemented but live verification pending | Each child object has its own Bulk API query and normalizer; live Salesforce relationship permissions/data remain environment-dependent. |
 | CSV extraction and local file persistence | ✅ Implemented/verified | `BatchFileService` and mocked end-to-end extraction test pass. |
-| Normalization to relational table families | ⚠️ Implemented but live verification pending | Normalizers and Parquet test exist, but child-table extraction is incomplete and the object catalog is inaccurate for Task/Event/OpportunityLineItem. |
+| Normalization to relational table families | ⚠️ Implemented but live verification pending | Normalizers and Parquet tests exist; live output shape and row availability remain environment-dependent. |
 | Hive-style MinIO path by organization/date | ✅ Implemented/verified | Unit test verifies `salesforce/{table}/glynac_organization_id={org}/processing_date={date}/...`. |
 | Persisted job lifecycle and progress | ✅ Implemented/verified | State transition, progress, lifecycle, and API-boundary tests pass. |
 | Background start and status API | ✅ Implemented/verified | `POST /api/scan/start`, status, list, statistics, and pipeline tests pass locally. |
@@ -68,8 +70,6 @@ this workspace.
 - CSV persistence and mocked extraction through normalization to Parquet.
 - Object normalizer registry for the primary Salesforce object families.
 - MinIO client behavior and required Hive-style object key construction.
-- Retry classification, bounded retry execution, payload scrubbing, and audit
-  hooks.
 - SQLAlchemy models, initial Alembic migration, Docker packaging metadata, and
   Compose configuration.
 
@@ -77,13 +77,12 @@ this workspace.
 
 Recorded local results from the project virtual environment:
 
-- `pytest -q`: **128 passed, 3 warnings**
+- `pytest -q`: **129 passed, 1 warning**
 - `ruff check .`: **passed**
 - `mypy src tests --hide-error-context --no-error-summary`: **passed**
 - `python -m compileall -q .`: **passed**
 
 Important test scope limitation: Salesforce and MinIO behavior is tested with
-mocked HTTP clients or fakes. Those tests establish application behavior but do
 not prove credentials, network access, Salesforce permissions, MinIO bucket
 access, or production data shape.
 
@@ -123,8 +122,9 @@ access, or production data shape.
   need shared replay state if that deployment requirement is introduced.
 - The current startup path calls `Base.metadata.create_all`; production still
   requires an explicit migration step and operational migration policy.
-- Child relationship outputs are represented by normalizers but are not
-  reliably populated by the current Salesforce queries.
+- Child objects are queried independently rather than through nested parent
+  SOQL. Live Salesforce permissions and data determine whether child tables
+  contain rows.
 - Nomad/Vault files are deployment references, not evidence of a live cluster
   deployment.
 
@@ -132,8 +132,9 @@ access, or production data shape.
 
 1. Prepare a dedicated Salesforce sandbox or test org with a Connected App,
    API access, Bulk API access, and permissions for Account, Contact,
-   Opportunity, OpportunityLineItem, Lead, Case, Task, Event, Campaign, User,
-   and the required child relationships.
+  Opportunity, OpportunityLineItem, OpportunityContactRole, Lead, Case,
+  CaseComment, Task, Event, Campaign, CampaignMember, User, and the required
+  Salesforce permissions.
 2. Configure the service with the sandbox login URL, API version, OAuth values,
    JWT key path or password-flow values, and conservative timeout/poll settings.
 3. Start PostgreSQL and MinIO, create the configured bucket, and run

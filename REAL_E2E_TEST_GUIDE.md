@@ -2,10 +2,10 @@
 
 This guide is for the final manual test. It does not claim that a real Salesforce run has passed. Use a non-production Salesforce organization and a test organization id.
 
-## Blockers to resolve first
+## Security prerequisites to resolve first
 
 1. `salesforce.key` is currently tracked by Git. Rotate the Salesforce JWT key pair, remove the tracked key from repository history/index, and keep only the replacement local key mounted at `./salesforce.key`. The `.gitignore` entry prevents future accidental addition but does not remove an already-tracked file.
-2. The scan workflow reaches `EXTRACTED`; normalization and MinIO upload are a separate API call. The current normalization write routes and `/api/key/verify` apply the HMAC dependency twice, so nonce replay protection can reject those requests. Fix that genuine blocker before expecting `COMPLETED`.
+2. The scan workflow reaches `EXTRACTED`; normalization and MinIO upload are a separate API call. Use the current application image and confirm the normalization request succeeds before treating the run as accepted.
 
 ## Prerequisites
 
@@ -93,7 +93,7 @@ Invoke-SfmsSigned GET /api/batch/info | ConvertTo-Json -Depth 8
 Invoke-SfmsSigned GET /api/normalization/supported-objects | ConvertTo-Json -Depth 8
 ```
 
-The key response should identify `coordinator`, role `full`, and `signature_valid: true`. The configured object list should contain `Account`, `Contact`, `Opportunity`, `OpportunityLineItem`, `Lead`, `Case`, `Task`, `Event`, `Campaign`, and `User`.
+The key response should identify `coordinator`, role `full`, and `signature_valid: true`. The configured object list should contain `Account`, `Contact`, `Opportunity`, `OpportunityLineItem`, `OpportunityContactRole`, `Lead`, `Case`, `CaseComment`, `Task`, `Event`, `Campaign`, `CampaignMember`, and `User`.
 
 ## Start a real scan
 
@@ -125,7 +125,7 @@ Invoke-SfmsSigned GET "/api/scan/$scanId/status" | ConvertTo-Json -Depth 12
 Invoke-SfmsSigned GET "/api/scan/list?organization_id=$organizationId&page=1&page_size=20" | ConvertTo-Json -Depth 12
 ```
 
-Poll status until `EXTRACTED`, or stop on `FAILED`/`CANCELLED`. The expected extraction progression is `PENDING`, `BATCH_REQUESTED`, `BATCH_PROCESSING`, `BATCH_READY`, `DOWNLOADING`, `DOWNLOADED`, `EXTRACTING`, `EXTRACTED`. Salesforce creates one Bulk API 2.0 query job for every configured object.
+Poll status until `EXTRACTED`, or stop on `FAILED`/`CANCELLED`. The expected extraction progression is `PENDING`, `BATCH_REQUESTED`, `BATCH_PROCESSING`, `BATCH_READY`, `DOWNLOADING`, `DOWNLOADED`, `EXTRACTING`, `EXTRACTED`. Salesforce creates one Bulk API 2.0 query job for every configured object, including the separate child objects. Parent queries do not contain nested child relationship subqueries.
 
 ## Normalize and upload to MinIO
 
@@ -142,7 +142,7 @@ $normalizeBody = @{
 Invoke-SfmsSigned POST "/api/normalization/$scanId/normalize" $normalizeBody | ConvertTo-Json -Depth 12
 ```
 
-This should produce `NORMALIZING`, `NORMALIZED`, `UPLOADING_TO_MINIO`, `UPLOADED_TO_MINIO`, and finally `COMPLETED`. Due to the HMAC double-dependency blocker listed above, this call is not expected to succeed until that blocker is fixed.
+This should produce `NORMALIZING`, `NORMALIZED`, `UPLOADING_TO_MINIO`, `UPLOADED_TO_MINIO`, and finally `COMPLETED`.
 
 ## Verify MinIO output
 
@@ -158,11 +158,15 @@ Expected tables are:
 |---|---|
 | Account | `accounts`, `account_addresses`, `account_teams` |
 | Contact | `contacts`, `contact_roles` |
-| Opportunity | `opportunities`, `opportunity_line_items`, `opportunity_contact_roles` |
+| Opportunity | `opportunities` |
+| OpportunityLineItem | `opportunity_line_items` |
+| OpportunityContactRole | `opportunity_contact_roles` |
 | Lead | `leads` |
-| Case | `cases`, `case_comments` |
+| Case | `cases` |
+| CaseComment | `case_comments` |
 | Task/Event | `tasks`, `events` |
-| Campaign | `campaigns`, `campaign_members` |
+| Campaign | `campaigns` |
+| CampaignMember | `campaign_members` |
 | User | `users` |
 
 The API can also list local normalized files:
@@ -213,7 +217,7 @@ The acceptance test is successful only when all configured Salesforce object exp
 - `401` from Salesforce: verify the JWT certificate/private-key match, External Client App policy, authorized user, username, client id, and login URL.
 - `healthy` but scan fails immediately: inspect `docker compose logs app` for a class/error code only; verify `/app/salesforce.key` exists in the container with `docker compose exec app sh -c "test -f /app/salesforce.key"`.
 - `BATCH` failure or timeout: check Salesforce API access, object permissions, Bulk API limits, and `SF_BULK_MAX_WAIT_MINUTES`.
-- `EXTRACTED` but no completion: call the normalization endpoint; resolve the documented HMAC double-dependency blocker first.
+- `EXTRACTED` but no completion: call the normalization endpoint and inspect the returned status/error; extraction and normalization are separate stages.
 - MinIO unhealthy or upload failure: check `docker compose ps`, bucket `salesforce-data`, MinIO credentials, and the app's `MINIO_ENDPOINT=minio:9000` setting.
 - Database errors: check `docker compose logs postgres`, confirm the app uses `postgres:5432` inside Compose, and rerun `docker compose up -d --build`.
 

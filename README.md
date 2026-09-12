@@ -38,16 +38,19 @@ Pipeline: Salesforce authentication -> Bulk API query jobs -> polling -> streame
 | --- | --- |
 | Account | `accounts`, `account_addresses`, `account_teams` |
 | Contact | `contacts`, `contact_roles` |
-| Opportunity | `opportunities`, `opportunity_line_items`, `opportunity_contact_roles` |
+| Opportunity | `opportunities` |
 | OpportunityLineItem | `opportunity_line_items` |
+| OpportunityContactRole | `opportunity_contact_roles` |
 | Lead | `leads` |
-| Case | `cases`, `case_comments` |
+| Case | `cases` |
+| CaseComment | `case_comments` |
 | Task | `tasks`, `events` |
 | Event | `tasks`, `events` |
-| Campaign | `campaigns`, `campaign_members` |
+| Campaign | `campaigns` |
+| CampaignMember | `campaign_members` |
 | User | `users` |
 
-The default object list is configurable with `SF_BULK_SUPPORTED_OBJECTS`. Salesforce permissions and available records determine which tables contain rows.
+The default object list is configurable with `SF_BULK_SUPPORTED_OBJECTS`. Each configured object is submitted as its own Salesforce Bulk API 2.0 query job. Child data is not retrieved with nested parent SOQL: `OpportunityLineItem`, `OpportunityContactRole`, `CaseComment`, and `CampaignMember` each have their own query and normalizer. Salesforce permissions and available records determine which tables contain rows.
 
 ## Job lifecycle
 
@@ -87,7 +90,7 @@ All routes except `/api/health` and `/api/stats` require HMAC authentication. Co
 | GET | `/api/audit/logs` | Audit log query |
 | GET | `/api/audit/stats` | Audit aggregates |
 
-Start requests contain `organization_id` and a `salesforce_credentials` object. With server-side JWT configuration, the request needs only `grant_type` and the authorized username. After extraction reaches `EXTRACTED`, call normalization with `output_format: "parquet"` and `upload_to_minio: true` to publish and complete the job.
+Start requests contain `organization_id` and a `salesforce_credentials` object. With server-side JWT configuration, the request needs only `grant_type` and the authorized username. After extraction reaches `EXTRACTED`, call normalization with `output_format: "parquet"` and `upload_to_minio: true` to publish and complete the job. Result downloads use a temporary `.part` file and are renamed only after CSV validation succeeds, so interrupted downloads are not treated as completed extraction files.
 
 ## Security
 
@@ -161,7 +164,7 @@ docker compose config --quiet
 git diff --check
 ```
 
-The suite uses mocked Salesforce/MinIO calls for deterministic local verification. A real E2E test is still required for the target org, permissions, network, live data shape, and deployment environment.
+The suite uses mocked Salesforce/MinIO calls for deterministic local verification. A real E2E test is still required for the target org, permissions, network, live data shape, and deployment environment. The latest local validation recorded 129 passing tests.
 
 ## Production deployment
 
